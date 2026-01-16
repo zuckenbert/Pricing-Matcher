@@ -429,4 +429,30 @@ Base mensal (por tier) + $0.01-0.05 por workflow execution bem-sucedida
 
 ---
 
+## Documentação Adicional
+
+Este repositório contém análises complementares:
+
+### 📊 [Análise de Custos por Workflow](docs/analise_custos.md)
+
+Análise detalhada dos custos marginais por workflow execution, incluindo:
+- Metodologia de cálculo (engenharia reversa do código)
+- Mapeamento de operações por workflow
+- Custo por componente (Temporal, MongoDB, PostgreSQL, Valkey)
+- Níveis de confiança por estimativa
+- Recomendações de pricing baseadas em custo
+
+**Resultado principal:** Custo marginal de ~R$ 0.001/workflow, permitindo margens de 85-95%.
+
+### 🔧 [Script de Benchmark](scripts/benchmark_workflow_cost.sh)
+
+Script para validação empírica dos custos:
+```bash
+# Executar benchmark (requer Docker)
+cd monorepo/apps/flowker
+./scripts/benchmark_workflow_cost.sh 100
+```
+
+---
+
 *Documento gerado em Janeiro 2025*
