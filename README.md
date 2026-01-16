@@ -433,6 +433,16 @@ Base mensal (por tier) + $0.01-0.05 por workflow execution bem-sucedida
 
 Este repositório contém análises complementares:
 
+### 🎯 [Análise Standalone vs. Compartilhado](docs/analise_standalone_vs_compartilhado.md) ⭐ NOVO
+
+Resposta à discussão sobre compartilhamento de infraestrutura entre produtos:
+- Por que precificar como "standalone" mesmo com infra compartilhada
+- Break-even analysis por tier de preço
+- Cenários de margem: worst case vs. best case
+- Recomendação de pricing ajustado para sustentabilidade
+
+**Princípio:** Pricing baseado em standalone (worst case), operação pode usar compartilhado (bônus de margem).
+
 ### 📊 [Análise de Custos por Workflow](docs/analise_custos.md)
 
 Análise detalhada dos custos marginais por workflow execution, incluindo:
