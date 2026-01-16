@@ -618,9 +618,237 @@ Tier Starter:
 
 ---
 
-## 9. Resumo Final
+## 9. TPS → QPS → Infraestrutura: Dimensionamento por Carga
+
+### 9.1 Entendendo a Relação TPS e QPS
+
+**TPS (Transactions Per Second):** É a carga que o cliente gera. Se o cliente faz 1.000.000 de transações por mês:
+- 1.000.000 ÷ 30 dias ÷ 24h ÷ 3600s = **~0.4 TPS médio**
+- Com fator de pico (3x): **~1.2 TPS de pico**
+
+**QPS (Queries Per Second):** É a carga real nos componentes de infraestrutura (PostgreSQL, Redis). Cada TPS gera múltiplas queries.
+
+### 9.2 Fórmula: TPS → QPS
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         FÓRMULA TPS → QPS                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Para SIZING de infraestrutura, assumimos 100% match rate (pior caso)      │
+│                                                                              │
+│   Por transação processada:                                                  │
+│   ├─ INGESTION: 1 Redis + 2 PostgreSQL = 3 operações                        │
+│   └─ MATCHING:  4 Redis + 4 PostgreSQL = 8 operações (assumindo match 1:1) │
+│                                                                              │
+│   TOTAL: 5 Redis ops + 6 PostgreSQL ops = 11 operações por transação        │
+│                                                                              │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │                                                                     │   │
+│   │   QPS_PostgreSQL = TPS × 6                                         │   │
+│   │   QPS_Redis = TPS × 5                                              │   │
+│   │   QPS_Total = TPS × 11                                             │   │
+│   │                                                                     │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
+│   Exemplo: Cliente com 10 TPS de pico                                        │
+│   ├─ PostgreSQL: 10 × 6 = 60 QPS                                            │
+│   └─ Redis: 10 × 5 = 50 QPS                                                 │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.3 De Transações/Mês para TPS de Pico
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│            CONVERSÃO: TRANSAÇÕES/MÊS → TPS PICO                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   TPS_médio = Transações_mês ÷ (30 × 24 × 3600)                             │
+│   TPS_pico = TPS_médio × FATOR_PICO                                         │
+│                                                                              │
+│   Fator de pico recomendado: 3x (padrão da indústria)                       │
+│                                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│   Txns/Mês    │ TPS Médio │ TPS Pico (3x) │ QPS Pico (×11)                  │
+│───────────────│───────────│───────────────│─────────────────                │
+│   500.000     │   0.19    │    0.6        │     7 QPS                       │
+│   1.000.000   │   0.39    │    1.2        │    13 QPS                       │
+│   2.000.000   │   0.77    │    2.3        │    25 QPS                       │
+│   5.000.000   │   1.93    │    5.8        │    64 QPS                       │
+│   10.000.000  │   3.86    │   11.6        │   128 QPS                       │
+│   50.000.000  │  19.29    │   57.9        │   637 QPS                       │
+│  100.000.000  │  38.58    │  115.7        │ 1.273 QPS                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.4 Tabela de Custos por TPS (Formato Midaz)
+
+Esta tabela segue o mesmo formato da planilha de pricing do Midaz, mas para o Matcher:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                    MATCHER - CUSTOS POR TPS (SaaS)                                              │
+├─────────┬────────────┬────────────┬────────────────────────────────────────────────────────────────────────────┤
+│         │            │            │                              COMPONENTES                                    │
+│   TPS   │ Total/mês  │ Total/mês  ├──────────┬───────────┬───────────┬──────────┬──────────┬──────────────────┤
+│  (pico) │   (USD)    │   (BRL)    │ Fargate  │PostgreSQL │   Redis   │ RabbitMQ │  Rede    │ Outros (logs,    │
+│         │            │            │          │           │           │          │          │ monitoring, S3)  │
+├─────────┼────────────┼────────────┼──────────┼───────────┼───────────┼──────────┼──────────┼──────────────────┤
+│    1    │   $230.00  │ R$ 1.150   │  $45.00  │  $88.00   │  $25.00   │  $57.00  │  $5.00   │     $10.00       │
+│    5    │   $370.00  │ R$ 1.850   │  $90.00  │ $132.00   │  $50.00   │  $57.00  │ $16.00   │     $25.00       │
+│   10    │   $501.00  │ R$ 2.505   │ $162.00  │ $185.00   │  $50.00   │  $59.00  │ $25.00   │     $20.00       │
+│   25    │   $748.00  │ R$ 3.740   │ $270.00  │ $280.00   │  $75.00   │  $59.00  │ $34.00   │     $30.00       │
+│   50    │ $1.110.00  │ R$ 5.550   │ $405.00  │ $420.00   │ $100.00   │ $100.00  │ $45.00   │     $40.00       │
+│  100    │ $1.680.00  │ R$ 8.400   │ $612.00  │ $630.00   │ $150.00   │ $208.00  │ $50.00   │     $30.00       │
+│  200    │ $2.600.00  │ R$13.000   │ $918.00  │ $945.00   │ $300.00   │ $208.00  │ $79.00   │    $150.00       │
+│  500    │ $5.200.00  │ R$26.000   │$1.530.00 │$1.890.00  │ $600.00   │ $416.00  │$114.00   │    $650.00       │
+│ 1000    │ $9.600.00  │ R$48.000   │$3.060.00 │$3.360.00  │$1.200.00  │ $624.00  │$156.00   │  $1.200.00       │
+└─────────┴────────────┴────────────┴──────────┴───────────┴───────────┴──────────┴──────────┴──────────────────┘
+
+Notas:
+- Valores em USD convertidos a R$ 5,00/USD
+- Assume 100% match rate para sizing conservador
+- Fargate: API + Workers (escala com TPS)
+- PostgreSQL: Instância RDS escala com QPS
+- Redis: ElastiCache escala com memória e ops/s
+- RabbitMQ: Amazon MQ (mínimo de ~$57/mês mesmo com baixo uso)
+```
+
+### 9.5 Comparação: Matcher vs Midaz
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    COMPARAÇÃO DE CUSTOS: MIDAZ vs MATCHER                    │
+├─────────┬───────────────────────┬───────────────────────┬───────────────────┤
+│   TPS   │      MIDAZ            │      MATCHER          │    Diferença      │
+│  (pico) │   Total/mês (USD)     │   Total/mês (USD)     │                   │
+├─────────┼───────────────────────┼───────────────────────┼───────────────────┤
+│   50    │     $2.060,94         │       $1.110          │   -46% (Matcher   │
+│  100    │     $2.813,42         │       $1.680          │    mais barato)   │
+│  300    │     $5.090,83         │       $3.380          │                   │
+│  600    │     $6.918,76         │       $6.100          │                   │
+│ 1000    │     $9.972,52         │       $9.600          │                   │
+├─────────┴───────────────────────┴───────────────────────┴───────────────────┤
+│                                                                              │
+│  POR QUE O MATCHER É MAIS BARATO?                                            │
+│  ────────────────────────────────                                            │
+│  1. Sem DocumentDB (Midaz usa, Matcher não)                                 │
+│  2. Sem EKS - usa Fargate direto (mais simples)                             │
+│  3. Menos storage - não guarda histórico completo                           │
+│  4. Menos CloudWatch - menos métricas                                        │
+│  5. Aplicação mais simples - menos containers                               │
+│                                                                              │
+│  O Midaz é um ledger completo com:                                           │
+│  - DocumentDB para flexibilidade de schema                                   │
+│  - EKS para orquestração complexa                                            │
+│  - Mais réplicas para alta disponibilidade                                   │
+│                                                                              │
+│  O Matcher é focado em uma única função (reconciliação)                      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.6 Como Usar na Conversa com Cliente
+
+**Cenário:** Cliente diz "Fazemos 5 milhões de transações por mês"
+
+```
+Passo 1: Converter para TPS
+─────────────────────────────
+5.000.000 ÷ (30 × 24 × 3600) = 1.93 TPS médio
+Com fator de pico (3x): 5.8 TPS de pico
+
+Passo 2: Encontrar o tier adequado
+─────────────────────────────
+TPS 5.8 → Entre 5 e 10 TPS → Tier Growth ou início de Scale
+
+Passo 3: Verificar custo de infra
+─────────────────────────────
+~10 TPS de pico → $501/mês USD → R$ 2.505/mês
+
+Passo 4: Aplicar margem para pricing
+─────────────────────────────
+Custo: R$ 2.505/mês
+Margem desejada: 70%
+Preço sugerido: R$ 2.505 ÷ (1 - 0.70) = R$ 8.350/mês
+
+Ou usar tier fixo: Growth = R$ 9.995/mês
+```
+
+### 9.7 Calculadora Rápida
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      CALCULADORA: TRANSAÇÕES → TIER                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Transações/mês         TPS Pico      Tier Recomendado     Preço Sugerido  │
+│   ──────────────         ────────      ────────────────     ──────────────  │
+│   < 1 milhão             < 1.2         STARTER              R$ 3.995/mês    │
+│   1-3 milhões            1.2 - 3.6     GROWTH               R$ 9.995/mês    │
+│   3-15 milhões           3.6 - 18      SCALE                R$ 24.995/mês   │
+│   > 15 milhões           > 18          ENTERPRISE           Custom          │
+│                                                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│   Fórmulas rápidas:                                                          │
+│                                                                              │
+│   TPS_médio = Txns_mês ÷ 2.592.000                                          │
+│   TPS_pico = TPS_médio × 3                                                  │
+│   QPS_infra = TPS_pico × 11                                                 │
+│   Custo_base ≈ R$ 500 + (TPS_pico × R$ 450)                                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 9.8 Detalhamento dos Componentes por TPS
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    SIZING DE INSTÂNCIAS POR TPS                              │
+├─────────┬───────────────────────┬───────────────────────┬───────────────────┤
+│   TPS   │     PostgreSQL        │        Redis          │     RabbitMQ      │
+│  (pico) │                       │                       │                   │
+├─────────┼───────────────────────┼───────────────────────┼───────────────────┤
+│   1-5   │ db.t3.medium          │ cache.t3.small        │ mq.t3.micro       │
+│         │ 2 vCPU, 4GB           │ 2 vCPU, 1.5GB         │ 2 vCPU, 1GB       │
+│         │ 100GB gp3             │                       │ 20GB              │
+│         │ ~30 QPS capacity      │ ~25K ops/s capacity   │ ~1K msg/s         │
+├─────────┼───────────────────────┼───────────────────────┼───────────────────┤
+│  5-20   │ db.t3.large           │ cache.t3.medium       │ mq.t3.micro       │
+│         │ 2 vCPU, 8GB           │ 2 vCPU, 3GB           │ 2 vCPU, 1GB       │
+│         │ 250GB gp3             │                       │ 50GB              │
+│         │ ~100 QPS capacity     │ ~50K ops/s capacity   │ ~1K msg/s         │
+├─────────┼───────────────────────┼───────────────────────┼───────────────────┤
+│  20-50  │ db.r6g.large          │ cache.r6g.large       │ mq.m5.large       │
+│         │ 2 vCPU, 16GB          │ 2 vCPU, 13GB          │ 2 vCPU, 8GB       │
+│         │ 500GB gp3             │                       │ 100GB             │
+│         │ ~200 QPS capacity     │ ~100K ops/s capacity  │ ~10K msg/s        │
+├─────────┼───────────────────────┼───────────────────────┼───────────────────┤
+│ 50-100  │ db.r6g.xlarge         │ cache.r6g.xlarge      │ mq.m5.large (HA)  │
+│         │ + Read Replica        │                       │                   │
+│         │ 4 vCPU, 32GB × 2      │ 4 vCPU, 26GB          │ Cluster mode      │
+│         │ 1TB gp3               │                       │                   │
+│         │ ~500 QPS capacity     │ ~200K ops/s capacity  │ ~50K msg/s        │
+├─────────┼───────────────────────┼───────────────────────┼───────────────────┤
+│  >100   │ db.r6g.2xlarge        │ cache.r6g.2xlarge     │ mq.m5.xlarge (HA) │
+│         │ + Multi-AZ + Replicas │ + Cluster mode        │ Multi-node        │
+│         │ 8 vCPU, 64GB          │ 8 vCPU, 52GB          │ cluster           │
+│         │ 2TB+ io1              │                       │                   │
+│         │ ~1000+ QPS capacity   │ ~500K ops/s capacity  │ ~100K msg/s       │
+└─────────┴───────────────────────┴───────────────────────┴───────────────────┘
+```
+
+---
+
+## 10. Resumo Final
 
 ### O que você precisa saber para avaliar o pricing:
+
+1. **TPS do cliente → QPS na infra:** Multiplicador de ~11x (5 Redis + 6 PostgreSQL)
+
+2. **Conversão rápida:** Txns/mês ÷ 2.592.000 × 3 = TPS de pico
 
 1. **PostgreSQL é o componente mais caro** - É onde estão os dados e as queries mais pesadas
 
@@ -645,4 +873,5 @@ Tier Starter:
 | Versão | Data | Alteração |
 |--------|------|-----------|
 | 1.0 | Jan 2026 | Versão inicial |
+| 1.1 | Jan 2026 | Adicionada seção TPS → QPS → Infraestrutura com tabela comparativa Midaz |
 
