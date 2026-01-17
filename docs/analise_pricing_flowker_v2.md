@@ -2,7 +2,7 @@
 
 **Data:** Janeiro 2025
 **Versão:** 2.0
-**Autor:** Análise assistida por IA (Claude/Gauchito)
+**Autor:** Equipe de Produto
 **Status:** Preliminar - Aguardando validação técnica
 
 ---
